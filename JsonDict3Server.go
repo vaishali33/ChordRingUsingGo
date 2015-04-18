@@ -12,7 +12,6 @@ import (
     "strings"
     "io/ioutil"
     "crypto/sha1"
-   "encoding/binary"
 )
 
 type DKey struct{
@@ -53,8 +52,8 @@ var port string
 var confLoc string
 var successor string
 var shakey string
-var id uint64
-var fingertable []string
+var chordid int
+var fingertable map[int]string
 
 //server shutdown
 func (t *DIC3) Shutdown(dKey *DKey, reply *int) error{
@@ -79,12 +78,9 @@ func (t *DIC3) Lookup(req *Request, reply *Response) error {
            	reply.Err = nil
            	return nil
         } else {
-           fmt.Println("Hash value = ")
-           getKeyRelHash(req.KeyRel.KeyA,req.KeyRel.RelA)
-           //ls := []string{ipAdd,":4567"}
-           ls := []string{ipAdd,successor}
-           service := strings.Join(ls,"")
 
+           krhash  := getKeyRelHash(req.KeyRel.KeyA,req.KeyRel.RelA)
+           service := findSuccessor(krhash)
            client, err := jsonrpc.Dial(protocol, service)
            if err != nil {
                 log.Fatal("dialing:", err)
@@ -185,8 +181,12 @@ func (t *DIC3) ListIDs(req *Request, reply *ListResponse) error {
 func main() {
 
 	loadConfig()
-
+        chordid = getChordId(port,ipAdd)
 	loadDict3()
+        fingertable = make(map[int]string)
+        sid := getChordId(successor,ipAdd)
+        ls := []string{ipAdd,successor}
+        fingertable[sid] = strings.Join(ls,"")
 
         //makeChordRing()
 
@@ -199,6 +199,8 @@ func main() {
 	listener, err := net.ListenTCP(protocol, tcpAddr)
 	checkError(err)
 
+        getRelHash("Neha")
+        getKeyHash("Tilak2")
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -260,6 +262,9 @@ func loadDict3() error{
 	return nil
 }
 
+func setFingers() {
+
+}
 func persistDict3()error{
 	 // For more granular writes, open a file for writing.
     f, err := os.Create(dict3File)
@@ -277,24 +282,90 @@ func persistDict3()error{
 	return nil
 }
 
-func getKeyRelHash(k string, r string) uint64 {
+func getKeyRelHash(k string, r string) int {
            h1 := sha1.New()
            h1.Write([]byte(k))
            b1 := h1.Sum(nil)
-           data1 := binary.BigEndian.Uint64(b1)
+           data1 := b1[0]
            id1 := data1 % 8
            id1 = id1 * 4
 
            h2 := sha1.New()
            h2.Write([]byte(r))
            b2 := h2.Sum(nil)
-           data2 := binary.BigEndian.Uint64(b2)
-           //data2 := binary.BigEndian.Int(b2)
+           data2 := b2[0]
            id2 := data2 % 4
-           retid := id1 + id2
-
+           retid := int(id1 + id2)
            fmt.Println("Hash for key-rel=" , retid)
            return retid
+}
+
+func getKeyHash(k string) [4]int {
+           h1 := sha1.New()
+           h1.Write([]byte(k))
+           b1 := h1.Sum(nil)
+           data1 := b1[0]
+           id1 := data1 % 8
+           id1 = id1 * 4
+           idint := int(id1)
+           var nodelist [4]int
+
+           nodelist[0] = (idint + 0)
+           nodelist[1] = (idint + 1)
+           nodelist[2] = (idint + 2)
+           nodelist[3] = (idint + 3)
+
+           fmt.Println("Nodelist for given key" , nodelist)
+           return nodelist
+}
+
+func getRelHash(r string) [8]int {
+           h1 := sha1.New()
+           h1.Write([]byte(r))
+           b1 := h1.Sum(nil)
+           data1 := b1[0]
+           id1 := data1 % 4
+           idint := int(id1)
+           var nodelist [8]int
+
+           for k := 0; k<8 ; k++ {
+               nodelist[k] = (k*4) + idint
+           }
+
+           fmt.Println("Nodelist for given relation" , nodelist)
+           return nodelist
+}
+
+func getChordId(po string, ip string) int{
+           addr := []string{po,ip}
+           idaddr := strings.Join(addr,"")
+
+           h1 := sha1.New()
+           h1.Write([]byte(idaddr))
+           b1 := h1.Sum(nil)
+
+           bb1 := int(b1[3]) + int(b1[2])*10 + int(b1[8])*20 + int(b1[12])*30
+           cid := bb1 % 32
+
+           fmt.Println("Chord id = ", cid)
+           return cid
+}
+
+func findSuccessor(nid int) string {
+
+           val := fingertable[nid]
+           if val != "" {
+              return val;
+           } else {
+             for k := 1; k< 32; k++ {
+                 nextone := (nid + k) % 32
+                 val1 := fingertable[nextone]
+                 if val1 != "" {
+                    return val1
+                 }
+             }
+           }
+           return fingertable[0]
 }
 
 func checkIfPresent(a string, list []string) bool {
