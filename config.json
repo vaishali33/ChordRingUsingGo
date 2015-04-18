@@ -1,0 +1,7 @@
+{"serverID":"myserver",
+"protocol":"tcp",
+"ipAddress":"localhost",
+"port":":1234",
+"successor":":4567",
+"persistentStorageContainer":{"file":"dict3.txt"},
+"methods":["lookup", "insert", "insertOrUpdate", "delete", "listKeys", "listIDs", "shutdown"]}
