@@ -1,13 +1,13 @@
 package main
 //concurrency map - https://blog.golang.org/go-maps-in-action
 import (
-	"fmt"
-	"net/rpc"
-	"net/rpc/jsonrpc"
-	"encoding/json"
-	"os"
-	"net"
-	"bufio"
+        "fmt"
+        "net/rpc"
+        "net/rpc/jsonrpc"
+        "encoding/json"
+        "os"
+        "net"
+        "bufio"
     "log"
     "strings"
     "io/ioutil"
@@ -18,29 +18,33 @@ import (
 )
 
 type DKey struct{
-	KeyA, RelA string
+        KeyA, RelA string
 }
 type Request struct{
-	KeyRel DKey
-	Val map[string]interface{}
+        KeyRel DKey
+        Val map[string]interface{}
         Permission string
 }
 type Response struct{
-	Tripair Triplet
-	Done bool
-	ID int
-	Err error
+        Tripair Triplet
+        Done bool
+        ID int
+        Err error
+}
+
+type ListRequest struct {
+        SourceId int
 }
 
 type Triplet struct{
-	Key, Rel string
-	Val map[string]interface{}
+        Key, Rel string
+        Val map[string]interface{}
 }
 
 type ListResponse struct{
-	List interface{}
-	Id int
-	Err error
+        List interface{}
+        Id int
+        Err error
 }
 
 type NodeInfo struct {
@@ -69,34 +73,39 @@ var purgeInterval int
 
 //server shutdown
 func (t *DIC3) Shutdown(dKey *DKey, reply *int) error{
-	fmt.Println("shuting server down!!!!!!")
-	*reply = 9
-	persistDict3()
+        fmt.Println("shuting server down!!!!!!")
+        *reply = 9
+        persistDict3()
         close(purgeChan)
-	os.Exit(0)
-	return nil
+        os.Exit(0)
+        return nil
 }
 //Lookup returns value stored for given key and relation
 func (t *DIC3) Lookup(req *Request, reply *Response) error {
-	fmt.Println("in Lookup : ", req.KeyRel.KeyA, req.KeyRel.RelA)
-	val := dict3[req.KeyRel]
+        fmt.Println("in Lookup : ", req.KeyRel.KeyA, req.KeyRel.RelA)
+        val := dict3[req.KeyRel]
 
         if val != nil {
 
                 val["accessed"] = time.Now()
-           	reply.Tripair.Key = req.KeyRel.KeyA
-           	reply.Tripair.Rel = req.KeyRel.RelA
-           	reply.Tripair.Val = val
-           	reply.Done = true
-           	reply.Err = nil
-           	return nil
+                reply.Tripair.Key = req.KeyRel.KeyA
+                reply.Tripair.Rel = req.KeyRel.RelA
+                reply.Tripair.Val = val
+                reply.Done = true
+                reply.Err = nil
+                return nil
         } else {
 
            krhash  := getKeyRelHash(req.KeyRel.KeyA,req.KeyRel.RelA)
            if krhash == chordid {
+              reply.Done = true
+              reply.Err = nil
               return nil
            }
-           service := findSuccessor(krhash)
+           //service := findSuccessor(krhash)
+           //if belongsto(krhash,chordid,successor.Chordid) {
+              service := successor.Address
+           //}
            client, err := jsonrpc.Dial(protocol, service)
            if err != nil {
                 log.Fatal("dialing:", err)
@@ -155,15 +164,19 @@ func (t *DIC3) Partial_Rel_Lookup(req *Request, reply *ListResponse) error {
 
 //Insert a given triplet in DICT3
 func (t *DIC3) Insert(triplet *Request, reply *Response) error {
-	fmt.Println("in Insert : ", triplet.KeyRel.KeyA, triplet.KeyRel.RelA, triplet.Val)
+        fmt.Println("in Insert : ", triplet.KeyRel.KeyA, triplet.KeyRel.RelA,
+triplet.Val)
 
         hashid := getKeyRelHash(triplet.KeyRel.KeyA, triplet.KeyRel.RelA)
         if belongsto(hashid, predecessor.Chordid, chordid) == true {
-        	dict3[DKey{triplet.KeyRel.KeyA, triplet.KeyRel.RelA}] = triplet.Val
-        	_, ok := dict3[DKey{triplet.KeyRel.KeyA, triplet.KeyRel.RelA}]
-        	reply.Done = ok
-        	reply.Err = nil
-        	return nil
+                //dict3[DKey{triplet.KeyRel.KeyA, triplet.KeyRel.RelA}] =
+                //triplet.Val
+                insertTripletToDict3(triplet.KeyRel, triplet.Val,
+triplet.Permission)
+                _, ok := dict3[DKey{triplet.KeyRel.KeyA, triplet.KeyRel.RelA}]
+                reply.Done = ok
+                reply.Err = nil
+                return nil
        }
        np := nearestPredecessor(hashid)
        client, err := jsonrpc.Dial(protocol, np.Address)
@@ -176,7 +189,6 @@ func (t *DIC3) Insert(triplet *Request, reply *Response) error {
        if replyCall != nil {
        }
 
-       reply.ID = reply2.ID
        reply.Done = reply2.Done
        reply.Err = reply2.Err
        fmt.Println(reply)
@@ -199,57 +211,196 @@ func insertTripletToDict3(dkey DKey, val map[string]interface{}, perm string){
 
 //InsertOrUpdate given triplet in DICT3
 func (t *DIC3) InsertOrUpdate(triplet *Request, reply *Response) error {
-	fmt.Println("in InsertOrUpdate : ", triplet.KeyRel.KeyA, triplet.KeyRel.RelA, triplet.Val)
-	keyRel := DKey{triplet.KeyRel.KeyA, triplet.KeyRel.RelA}
-	_, ok := dict3[keyRel]
-	if !ok {
-		//Insert
-		fmt.Println("Inserting.....")
-		dict3[keyRel] = triplet.Val
-	}else{
-		//Update
-		fmt.Println("Updating.....")
-		delete(dict3, keyRel)
-		dict3[DKey{triplet.KeyRel.KeyA, triplet.KeyRel.RelA}] = triplet.Val
-	}
-	reply.Done = ok
-	reply.Err = nil
-	return nil
+        fmt.Println("in InsertOrUpdate : ", triplet.KeyRel.KeyA,
+triplet.KeyRel.RelA, triplet.Val)
+
+        hashid := getKeyRelHash(triplet.KeyRel.KeyA, triplet.KeyRel.RelA)
+        if belongsto(hashid, predecessor.Chordid, chordid) == true {
+           keyRel := DKey{triplet.KeyRel.KeyA, triplet.KeyRel.RelA}
+           v, ok := dict3[keyRel]
+           if !ok {
+                //Insert
+                fmt.Println("Inserting.....")
+                //dict3[keyRel] = triplet.Val
+                insertTripletToDict3(triplet.KeyRel, triplet.Val,
+triplet.Permission)
+           }else{
+                //Update
+                fmt.Println("Updating.....")
+                access := v["permission"].(string)
+                if  (strings.EqualFold("RW", access)){
+                        v["content"] = triplet.Val
+                        v["size"] = reflect.TypeOf(triplet.Val).Size()
+                        v["modified"] = time.Now()
+                        _, ok = dict3[DKey{triplet.KeyRel.KeyA,
+triplet.KeyRel.RelA}]
+                } else {
+                        fmt.Println("No RW access")
+                }
+           }
+
+        reply.Done = ok
+        reply.Err = nil
+        return nil
+        }
+       np := nearestPredecessor(hashid)
+       client, err := jsonrpc.Dial(protocol, np.Address)
+       if err != nil {
+            log.Fatal("dialing:", err)
+       }
+       var reply2 Response
+       RpcCall := client.Go("DIC3.InsertOrUpdate", triplet, &reply2,nil)
+       replyCall := <-RpcCall.Done
+       if replyCall != nil {
+       }
+
+       reply.Done = reply2.Done
+       reply.Err = reply2.Err
+       fmt.Println(reply)
+       client.Close()
+       return nil
+
 }
 
 //Delete from DICT3
 func (t *DIC3) Delete(req *Request, reply *Response) error {
-	fmt.Println("in Delete : ", req.KeyRel.KeyA, req.KeyRel.RelA)
-	delete(dict3, req.KeyRel)
-	fmt.Println("after delete DICT3 ", dict3)
-	reply.Done = true
-	reply.Err = nil
-	return nil
+        fmt.Println("in Delete : ", req.KeyRel.KeyA, req.KeyRel.RelA)
+        delete(dict3, req.KeyRel)
+        fmt.Println("after delete DICT3 ", dict3)
+        reply.Done = true
+        reply.Err = nil
+        return nil
+
+        v, ok := dict3[DKey{req.KeyRel.KeyA, req.KeyRel.RelA}]
+        if ok {
+            access := v["permission"].(string)
+                if(strings.EqualFold("RW", access)){
+                        delete(dict3, req.KeyRel)
+                        fmt.Println("after delete DICT3 ", dict3)
+
+                }else{
+                        fmt.Println("No RW access!!")
+                }
+        reply.Done = true
+        reply.Err = nil
+        return nil
+        }
+
+       hashid := getKeyRelHash(req.KeyRel.KeyA, req.KeyRel.RelA)
+       np := nearestPredecessor(hashid)
+       client, err := jsonrpc.Dial(protocol, np.Address)
+       if err != nil {
+            log.Fatal("dialing:", err)
+       }
+       var reply2 Response
+       RpcCall := client.Go("DIC3.Delete", req, &reply2,nil)
+       replyCall := <-RpcCall.Done
+       if replyCall != nil {
+       }
+
+       reply.Done = reply2.Done
+       reply.Err = reply2.Err
+       fmt.Println(reply)
+       client.Close()
+       return nil
+
 }
 
 //list keys in DICT3
-func (t *DIC3) Listkeys(req *Request, reply *ListResponse) error {
-	keys := make([]string, 0, len(dict3))
-    for k := range dict3 {
-    	found := checkIfPresent(k.KeyA, keys)
-    	if !found{
-        	keys = append(keys, k.KeyA)
-        	}
-    }
-	reply.List = keys
-	reply.Err = nil
-	return nil
+func (t *DIC3) Listkeys(req *ListRequest, reply *ListResponse) error {
+        var req2 ListRequest
+        if req.SourceId == -1 {
+           req2.SourceId = chordid
+        }
+        if successor.Chordid == req.SourceId {
+
+            keys := make([]string, 0, len(dict3))
+            for k := range dict3 {
+                found := checkIfPresent(k.KeyA, keys)
+                if !found{
+                      keys = append(keys, k.KeyA)
+                }
+            }
+        reply.List = keys
+        reply.Err = nil
+        return nil
+        } else {
+            client, err := jsonrpc.Dial(protocol, successor.Address)
+            if err != nil {
+                log.Fatal("dialing:", err)
+            }
+            var reply2 ListResponse
+            RpcCall := client.Go("DIC3.ListKeys", req2, &reply2,nil)
+            replyCall := <-RpcCall.Done
+            if replyCall != nil {
+            }
+            tempvar := reply2.List.([]string)
+            fmt.Println(tempvar)
+            keys := make([]string, 0, (len(dict3) + len(tempvar)))
+            for k := range dict3 {
+                found := checkIfPresent(k.KeyA, keys)
+                if !found{
+                      keys = append(keys, k.KeyA)
+                }
+            }
+            for j:= range tempvar {
+                found := checkIfPresent(tempvar[j], keys)
+                if !found{
+                      keys = append(keys, tempvar[j])
+                }
+            }
+            reply.List = keys
+            reply.Err = nil
+            return nil
+          }
+          return nil
 }
 
 //list key-relation pairs in DICT3
-func (t *DIC3) ListIDs(req *Request, reply *ListResponse) error {
-	keys := make([]string, 0, len(dict3))
-    for k := range dict3 {
-        keys = append(keys, "[",k.KeyA,",", k.RelA, "]")
-    }
-	reply.List = keys
-	reply.Err = nil
-	return nil
+func (t *DIC3) ListIDs(req *ListRequest, reply *ListResponse) error {
+        var req2 ListRequest
+        if req.SourceId == -1 {
+           req2.SourceId = chordid
+        }
+        if successor.Chordid == req.SourceId {
+
+            keys := make([]string, 0, len(dict3))
+            for k := range dict3 {
+                keys = append(keys, "[",k.KeyA,",",k.RelA,"]")
+            }
+        reply.List = keys
+        reply.Err = nil
+        return nil
+        } else {
+            client, err := jsonrpc.Dial(protocol, successor.Address)
+            if err != nil {
+                log.Fatal("dialing:", err)
+            }
+            var reply2 ListResponse
+            RpcCall := client.Go("DIC3.ListIDs", req2, &reply2,nil)
+            replyCall := <-RpcCall.Done
+            if replyCall != nil {
+            }
+            tempvar := reply2.List.([]string)
+            fmt.Println(tempvar)
+            keys := make([]string, 0, (len(dict3) + len(tempvar)))
+            for k := range dict3 {
+                found := checkIfPresent(k.KeyA, keys)
+                if !found{
+                      keys = append(keys, k.KeyA)
+                }
+            }
+            for j:= range tempvar {
+                found := checkIfPresent(tempvar[j], keys)
+                if !found{
+                      keys = append(keys, tempvar[j])
+                }
+            }
+            reply.List = keys
+            reply.Err = nil
+            return nil
+          }
+          return nil
 }
 
 func (t *DIC3) Notify(request NodeInfo, reply *NodeInfo) error {
@@ -275,17 +426,20 @@ func (t *DIC3) FindSuccessor(request NodeInfo, reply *NodeInfo) error {
                 fmt.Println("Updated successor as ",successor)
 
                 // Notify previous successor
-                client1, err := jsonrpc.Dial(protocol, prevSuc.Address)
-                if err != nil {
-                     log.Fatal("dialing:", err)
-                }
-                var replynull NodeInfo
+                if prevSuc.Chordid != chordid {
+                   client1, err := jsonrpc.Dial(protocol, prevSuc.Address)
+                   if err != nil {
+                        log.Fatal("dialing:", err)
+                   }
+                   var replynull NodeInfo
 
-                RpcCall := client1.Go("DIC3.FindNotify", request, &replynull,nil)
-                replyCall := <-RpcCall.Done
-                if replyCall != nil {
+                   RpcCall := client1.Go("DIC3.FindNotify", request,
+&replynull,nil)
+                   replyCall := <-RpcCall.Done
+                   if replyCall != nil {
+                   }
+                   client1.Close()
                 }
-                client1.Close()
 
                 return nil
         } else {
@@ -302,6 +456,7 @@ func (t *DIC3) FindSuccessor(request NodeInfo, reply *NodeInfo) error {
                 client.Close()
                     reply.Address = reply2.Address
                     reply.Chordid = reply2.Chordid
+                    return nil
         }
         return nil
 }
@@ -323,43 +478,50 @@ func belongsto (num int, start int, end int) bool {
 
 //background process for purging unused triplets
 func purgeUnusedTriplets(){
-	//not prefered because it just considers gap between execution, not schedule
-	//time.AfterFunc(time.Second*time.Duration(5), purgeUnusedTriplets)
+        //not prefered because it just considers gap between execution, not
+        //schedule
+        //time.AfterFunc(time.Second*time.Duration(5), purgeUnusedTriplets)
 
-	purgeTicker := time.NewTicker(time.Duration(purgeInterval) * time.Second)
-	purgeChan = make(chan struct{})
-	go func() {
-		for {
-			select {
-			case <-purgeTicker.C:
-				fmt.Println("Purging Unused triplets ", time.Now())
-				for k, v := range dict3{
-					access := v["permission"].(string)
-					if(strings.EqualFold("RW", access)){
-						accessed := v["accessed"].(string)
-						access_time, err := time.Parse("2006-01-02 15:04", accessed)
-						checkError(err)
-						duration := time.Since(access_time)
-						if(duration > time.Duration(purgeInterval)){
-							//delete triplet
-							delete(dict3, k)
-						}
-					}
-				}
-			case <-purgeChan:
-				purgeTicker.Stop()
-				fmt.Println("Stopped the purgeTicker!")
-				return
-			}
-		}
-	}()
+        purgeTicker := time.NewTicker(time.Duration(purgeInterval) *
+time.Second)
+        purgeChan = make(chan struct{})
+        go func() {
+                for {
+                        select {
+                        case <-purgeTicker.C:
+                                fmt.Println("Purging Unused triplets ",
+time.Now())
+                                for k, v := range dict3{
+                                        access := v["permission"].(string)
+                                        if(strings.EqualFold("RW", access)){
+                                                accessed :=
+v["accessed"].(string)
+                                                access_time, err :=
+time.Parse("2006-01-02 15:04", accessed)
+                                                checkError(err)
+                                                duration :=
+time.Since(access_time)
+                                                if(duration >
+time.Duration(purgeInterval)){
+                                                        //delete triplet
+                                                        delete(dict3, k)
+                                                }
+                                        }
+                                }
+                        case <-purgeChan:
+                                purgeTicker.Stop()
+                                fmt.Println("Stopped the purgeTicker!")
+                                return
+                        }
+                }
+        }()
 }
 
 func main() {
 
-	loadConfig()
+        loadConfig()
         //chordid = getChordId(port,ipAdd)
-	loadDict3()
+        loadDict3()
         fingertable = make(map[int]NodeInfo)
         //sid := getChordId(successor,ipAdd)
         //ls := []string{ipAdd,successor}
@@ -367,99 +529,103 @@ func main() {
 
         createChordRing()
 
-	dic3 := new(DIC3)
-	rpc.Register(dic3)
+//        knownip := "localhost:1234"
+//        joinChordRing(knownip)
 
-	tcpAddr, err := net.ResolveTCPAddr(protocol, port)
-	checkError(err)
-	fmt.Println("Server started........")
-	listener, err := net.ListenTCP(protocol, tcpAddr)
-	checkError(err)
+        dic3 := new(DIC3)
+        rpc.Register(dic3)
 
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			continue
-		}
-		jsonrpc.ServeConn(conn)
-	}
+        tcpAddr, err := net.ResolveTCPAddr(protocol, port)
+        checkError(err)
+        fmt.Println("Server started........")
+        listener, err := net.ListenTCP(protocol, tcpAddr)
+        checkError(err)
+
+        for {
+                conn, err := listener.Accept()
+                if err != nil {
+                        continue
+                }
+                jsonrpc.ServeConn(conn)
+        }
 
 }
 //load config in configMap
 func loadConfig() error{
-	configMap = make(map[string]interface{})
-	fmt.Println("Reading ", os.Args[1])
-	dat, err := ioutil.ReadFile(os.Args[1])
+        configMap = make(map[string]interface{})
+        fmt.Println("Reading ", os.Args[1])
+        dat, err := ioutil.ReadFile(os.Args[1])
     checkError(err)
     //fmt.Print(dat)
 
-	if err := json.Unmarshal(dat, &configMap); err != nil {
+        if err := json.Unmarshal(dat, &configMap); err != nil {
         log.Fatal("Error in loading config ", err)
     }
-	protocol = configMap["protocol"].(string)
-	ipAdd = configMap["ipAddress"].(string)
-	port = configMap["port"].(string)
+        protocol = configMap["protocol"].(string)
+        ipAdd = configMap["ipAddress"].(string)
+        port = configMap["port"].(string)
         addr := []string{ipAdd,port}
         selfaddr = strings.Join(addr,"")
         if selfaddr == "" {
           fmt.Println("Could not initialize selfaddr")
         }
         chordid = getChordId(port,ipAdd)
-         persiStorage := configMap["persistentStorageContainer"].(map[string]interface{})
-	dict3File = persiStorage["file"].(string)
-	methods = configMap["methods"].([]interface{})
-	fmt.Println("Methods exposed by server: ", methods)
-	return nil
+         persiStorage :=
+configMap["persistentStorageContainer"].(map[string]interface{})
+        dict3File = persiStorage["file"].(string)
+        methods = configMap["methods"].([]interface{})
+        fmt.Println("Methods exposed by server: ", methods)
+        return nil
 }
 //load DICT3 in memory from persistent storage
 func loadDict3() error{
-	dict3 = make(map[DKey]map[string]interface{})
+        dict3 = make(map[DKey]map[string]interface{})
 
-	file, err := os.Open(dict3File)
-	if err != nil {
-    	log.Fatal(err)
-	}
-	defer file.Close()
+        file, err := os.Open(dict3File)
+        if err != nil {
+        log.Fatal(err)
+        }
+        defer file.Close()
 
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-    	arr := strings.Split(scanner.Text(), "=")
-    	if len(arr) == 3{
-    		key_rel := DKey{arr[0], arr[1]}
-    		b :=[]byte(arr[2])
-			var f map[string]interface{}
-			err := json.Unmarshal(b, &f)
-			if err != nil{
-				log.Fatal(err)
-			}
-			dict3[key_rel] = f
-		}
-	}
-	fmt.Println(dict3)
-	if err := scanner.Err(); err != nil {
-    	log.Fatal(err)
-	}
-	return nil
+        scanner := bufio.NewScanner(file)
+        for scanner.Scan() {
+        arr := strings.Split(scanner.Text(), "=")
+        if len(arr) == 3{
+                key_rel := DKey{arr[0], arr[1]}
+                b :=[]byte(arr[2])
+                        var f map[string]interface{}
+                        err := json.Unmarshal(b, &f)
+                        if err != nil{
+                                log.Fatal(err)
+                        }
+                        dict3[key_rel] = f
+                }
+        }
+        fmt.Println(dict3)
+        if err := scanner.Err(); err != nil {
+        log.Fatal(err)
+        }
+        return nil
 }
 
 func setFingers() {
 
 }
 func persistDict3()error{
-	 // For more granular writes, open a file for writing.
+         // For more granular writes, open a file for writing.
     f, err := os.Create(dict3File)
     checkError(err)
     defer f.Close()
 
-	for k, v := range dict3{
-		b, err := json.Marshal(v)
-		val := string(b[:])
-		s := []string{k.KeyA, "=", k.RelA,"=", val,"\n"}
-		_, err = f.WriteString(strings.Join(s, ""))
-		checkError(err)
-		f.Sync()
-	}
-	return nil
+        for k, v := range dict3{
+                b, err := json.Marshal(v)
+                val := string(b[:])
+                s := []string{k.KeyA, "=", k.RelA,"=", val,"\n"}
+                _, err = f.WriteString(strings.Join(s, ""))
+                checkError(err)
+                f.Sync()
+        }
+        return nil
 }
 
 func getKeyRelHash(k string, r string) int {
@@ -555,7 +721,8 @@ func joinChordRing(naddr string) error {
            if replyCall != nil {
            }
            successor.Address = reply.Address
-           fingertable[1] = NodeInfo{reply.Chordid,successor.Address}
+           successor.Chordid = reply.Chordid
+           fingertable[1] = NodeInfo{reply.Chordid,reply.Address}
            fmt.Println("Joined chord ring")
            fmt.Println("joinChordRing: successor =", successor.Address)
            client.Close()
@@ -597,8 +764,8 @@ func checkIfPresent(a string, list []string) bool {
 }
 
 func checkError(err error) {
-	if err != nil {
-		fmt.Println("Fatal error ", err.Error())
-		os.Exit(1)
-	}
+        if err != nil {
+                fmt.Println("Fatal error ", err.Error())
+                os.Exit(1)
+        }
 }
