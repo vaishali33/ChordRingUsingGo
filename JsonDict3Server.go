@@ -69,14 +69,21 @@ var chordid int
 var selfaddr string
 var fingertable map[int]NodeInfo
 var purgeChan chan struct{}
-var purgeInterval int
+var stabilizeChan chan struct{}
+var checkPredChan chan struct{}
+var purgeInterval float64
+var stabilizeInterval float64
+var checkPredInterval float64
 
 //server shutdown
 func (t *DIC3) Shutdown(dKey *DKey, reply *int) error{
         fmt.Println("shuting server down!!!!!!")
         *reply = 9
-        persistDict3()
-        close(purgeChan)
+       close(stabilizeChan)
+	close(checkPredChan)
+	if successor.Chordid == chordid {
+		persistDict3()
+	}
         os.Exit(0)
         return nil
 }
@@ -116,7 +123,6 @@ func (t *DIC3) Lookup(req *Request, reply *Response) error {
            if replyCall != nil {
            }
 
-                reply.ID = reply2.ID
                 reply.Tripair.Key = reply2.Tripair.Key
                 reply.Tripair.Rel = reply2.Tripair.Rel
                 reply.Tripair.Val = reply2.Tripair.Val
@@ -476,45 +482,94 @@ func belongsto (num int, start int, end int) bool {
         return false
 }
 
-//background process for purging unused triplets
+//process for purging unused triplets
 func purgeUnusedTriplets(){
-        //not prefered because it just considers gap between execution, not
-        //schedule
-        //time.AfterFunc(time.Second*time.Duration(5), purgeUnusedTriplets)
 
-        purgeTicker := time.NewTicker(time.Duration(purgeInterval) *
-time.Second)
-        purgeChan = make(chan struct{})
-        go func() {
-                for {
-                        select {
-                        case <-purgeTicker.C:
-                                fmt.Println("Purging Unused triplets ",
-time.Now())
-                                for k, v := range dict3{
-                                        access := v["permission"].(string)
-                                        if(strings.EqualFold("RW", access)){
-                                                accessed :=
-v["accessed"].(string)
-                                                access_time, err :=
-time.Parse("2006-01-02 15:04", accessed)
-                                                checkError(err)
-                                                duration :=
-time.Since(access_time)
-                                                if(duration >
-time.Duration(purgeInterval)){
-                                                        //delete triplet
-                                                        delete(dict3, k)
-                                                }
-                                        }
-                                }
-                        case <-purgeChan:
-                                purgeTicker.Stop()
-                                fmt.Println("Stopped the purgeTicker!")
-                                return
-                        }
-                }
-        }()
+	fmt.Println("Purging Unused triplets ", time.Now())
+	for k, v := range dict3{
+		access := v["permission"].(string)
+		if(strings.EqualFold("RW", access)){
+			accessed := v["accessed"].(string)
+			access_time, err := time.Parse("2006-01-02 15:04", accessed)
+			checkError(err)
+			duration := time.Since(access_time)
+			if(duration > time.Duration(purgeInterval)){
+				//delete triplet
+				delete(dict3, k)
+			}
+		}
+	}
+
+}
+
+//background process
+//called periodically; verifies nodes immidiate successor
+//and tell successor about node
+func stabilize(){
+	stabilizeTicker := time.NewTicker(time.Duration(stabilizeInterval) * time.Second)
+	stabilizeChan = make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-stabilizeTicker.C:
+				fmt.Println("stabilizing chord ring ",  time.Now())
+				client, err := jsonrpc.Dial(protocol, successor.Address)
+           		checkError(err)
+           		var x NodeInfo
+          		RpcCall := client.Go("DIC3.Predecessor", successor, &x,nil)
+           		replyCall := <-RpcCall.Done
+           		if replyCall != nil {}
+
+				if(x.Chordid> chordid && x.Chordid < successor.Chordid){
+					//update this node's successor
+					successor = x
+				}
+
+				//tell successor- new node, that this node id its predecessor
+				RpcCall = client.Go("DIC3.Notify", successor, nil,nil)
+           		replyCall = <-RpcCall.Done
+           		if replyCall != nil {}
+
+				client.Close()
+
+			case <-stabilizeChan:
+				stabilizeTicker.Stop()
+				fmt.Println("Stopped the stabilizeTicker!")
+				return
+			}
+		}
+	}()
+}
+
+//called periodically. checks whether predecessor has failed
+func check_predecessor(){
+
+	checkPredTicker := time.NewTicker(time.Duration(checkPredInterval) * time.Second)
+	checkPredChan = make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-checkPredTicker.C:
+				fmt.Println("checking Predecessor ",  time.Now())
+				client, err := jsonrpc.Dial(protocol, predecessor.Address)
+           		if(err != nil){
+           			//predecessor has failed
+           			predecessor.Chordid = -1
+           		}
+           		//var x NodeInfo
+          		//RpcCall := client.Go("DIC3.Predecessor", ipAdd, &x,nil)
+           		//replyCall := <-RpcCall.Done
+           		//if replyCall != nil {}
+
+				client.Close()
+
+			case <-checkPredChan:
+				checkPredTicker.Stop()
+				fmt.Println("Stopped the checkPredTicker!")
+				return
+			}
+		}
+	}()
 }
 
 func main() {
@@ -528,6 +583,8 @@ func main() {
         //fingertable[sid] = strings.Join(ls,"")
 
         createChordRing()
+        stabilize()
+        check_predecessor()
 
 //        knownip := "localhost:1234"
 //        joinChordRing(knownip)
@@ -571,9 +628,13 @@ func loadConfig() error{
         }
         chordid = getChordId(port,ipAdd)
          persiStorage :=
-configMap["persistentStorageContainer"].(map[string]interface{})
+        configMap["persistentStorageContainer"].(map[string]interface{})
         dict3File = persiStorage["file"].(string)
         methods = configMap["methods"].([]interface{})
+        purgeInterval = configMap["purgeInterval"].(float64)
+        stabilizeInterval = configMap["stabilizeInterval"].(float64)
+        checkPredInterval = configMap["checkPredInterval"].(float64)
+
         fmt.Println("Methods exposed by server: ", methods)
         return nil
 }
