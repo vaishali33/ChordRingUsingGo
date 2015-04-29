@@ -168,6 +168,16 @@ func (t *DIC3) Partial_Rel_Lookup(req *Request, reply *ListResponse) error {
         return nil
 }
 
+//Insert DICT3 in successor
+func (t *DIC3) InsertDict3ToSuccessor(dict *map[DKey]map[string]interface{}, reply *Response) error {
+       fmt.Println("in Batch Insert DICT3: ")
+       for k, v := range *dict{
+           dict3[k] = v
+       }
+       reply.Err = nil
+	   return nil
+}
+
 //Insert a given triplet in DICT3
 func (t *DIC3) Insert(triplet *Request, reply *Response) error {
         fmt.Println("in Insert : ", triplet.KeyRel.KeyA, triplet.KeyRel.RelA,
