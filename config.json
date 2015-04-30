@@ -1,7 +1,10 @@
 {"serverID":"myserver",
-"protocol":"tcp",
-"ipAddress":"localhost",
-"port":":1234",
-"successor":":4567",
-"persistentStorageContainer":{"file":"dict3.txt"},
-"methods":["lookup", "insert", "insertOrUpdate", "delete", "listKeys", "listIDs", "shutdown"]}
+        "protocol":"tcp",
+        "ipAddress":"localhost",
+        "port":":1111",
+        "persistentStorageContainer":{"file":"dict3.txt"},
+        "purgeInterval":1200,
+        "stabilizeInterval":3,
+        "checkPredInterval":10,
+        "fixfingersInterval":2,
+        "methods":["lookup", "insert", "insertOrUpdate", "delete", "listKeys", "listIDs", "shutdown"]}
