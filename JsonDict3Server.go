@@ -71,20 +71,91 @@ var fingertable map[int]NodeInfo
 var purgeChan chan struct{}
 var stabilizeChan chan struct{}
 var checkPredChan chan struct{}
+var fixfingersChan chan struct{}
 var purgeInterval float64
 var stabilizeInterval float64
 var checkPredInterval float64
+var fixfingersInterval float64
+var next int
 
 //server shutdown
 func (t *DIC3) Shutdown(dKey *DKey, reply *int) error{
         fmt.Println("shuting server down!!!!!!")
         *reply = 9
-       close(stabilizeChan)
+        updateSuccessorOfP()
+        updatePredecessorOfS()
+        InsertDict3ToSuccessor()
+        close(stabilizeChan)
 	close(checkPredChan)
+	close(fixfingersChan)
 	if successor.Chordid == chordid {
 		persistDict3()
 	}
         os.Exit(0)
+        return nil
+}
+
+func InsertDict3ToSuccessor() {
+	client, err := jsonrpc.Dial(protocol, successor.Address)
+        if err != nil {
+             log.Fatal("dialing:", err)
+        }
+        var reply2 int
+        RpcCall := client.Go("DIC3.RPCUpdatePredecessorOfS", dict3, &reply2,nil)
+        replyCall := <-RpcCall.Done
+        if replyCall != nil {
+        }
+        client.Close()
+}
+
+//Insert DICT3 in successor
+func (t *DIC3) RPCInsertDict3ToSuccessor(dict *map[DKey]map[string]interface{}, reply *int) error {
+	fmt.Println("in Batch Insert DICT3: ")
+	for k, v := range *dict{
+		dict3[k] = v
+	}
+        *reply = 1
+	return nil
+}
+
+func updateSuccessorOfP() {
+	np := nearestPredecessor(chordid)
+        client, err := jsonrpc.Dial(protocol, np.Address)
+        if err != nil {
+             log.Fatal("dialing:", err)
+        }
+        var reply2 int
+        RpcCall := client.Go("DIC3.RPCUpdateSuccessorOfP", successor.Chordid, &reply2,nil)
+        replyCall := <-RpcCall.Done
+        if replyCall != nil {
+        }
+        client.Close()
+}
+
+
+func (t *DIC3) RPCUpdateSuccessorOfP(request int, reply *int) error {
+	successor.Chordid = request
+	*reply = 1
+        return nil
+}
+
+func updatePredecessorOfS() {
+        client, err := jsonrpc.Dial(protocol, successor.Address)
+        if err != nil {
+             log.Fatal("dialing:", err)
+        }
+        var reply2 int
+        RpcCall := client.Go("DIC3.RPCUpdatePredecessorOfS", predecessor.Chordid, &reply2,nil)
+        replyCall := <-RpcCall.Done
+        if replyCall != nil {
+        }
+        client.Close()
+}
+
+
+func (t *DIC3) RPCUpdatePredecessorOfS(request int, reply *int) error {
+	predecessor.Chordid = request
+	*reply = 1
         return nil
 }
 //Lookup returns value stored for given key and relation
@@ -486,7 +557,7 @@ func belongsto (num int, start int, end int) bool {
         if diff2 <= 0 {
            diff2 = diff2 + 32
         }
-        if diff1 > diff2 {
+        if diff1 >= diff2 {
            return true
         }
         return false
@@ -592,10 +663,12 @@ func main() {
         //ls := []string{ipAdd,successor}
         //fingertable[sid] = strings.Join(ls,"")
 
+        next = 0
         createChordRing()
         stabilize()
         check_predecessor()
 
+          fixFingers();
 //        knownip := "localhost:1234"
 //        joinChordRing(knownip)
 
@@ -644,7 +717,7 @@ func loadConfig() error{
         purgeInterval = configMap["purgeInterval"].(float64)
         stabilizeInterval = configMap["stabilizeInterval"].(float64)
         checkPredInterval = configMap["checkPredInterval"].(float64)
-
+        xfingersInterval = configMap["fixfingersInterval"].(float64)
         fmt.Println("Methods exposed by server: ", methods)
         return nil
 }
@@ -679,8 +752,72 @@ func loadDict3() error{
         return nil
 }
 
-func setFingers() {
+func fixFingers(){
+	fixfingersTicker := time.NewTicker(time.Duration(fixfingersInterval) * time.Second)
+	fixfingersChan = make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-fixfingersTicker.C:
+				//fmt.Println("fix fingers of node ",  time.Now())
+				next = next + 1
+				if next > 5 {
+					next = 1
+				}
+				
+				fingertable[next] = findSuccessorFT((chordid + int(math.Pow(2, float64(next-1))))%32)
+				fmt.Println("finger ", next, fingertable[next])
+			case <-fixfingersChan:
+				fixfingersTicker.Stop()
+				fmt.Println("Stopped the fixfingersTicker!")
+				return
+			}
+		}
+	}()
+}
 
+func findSuccessorFT(id int) NodeInfo{
+	if belongsto(id , chordid, successor.Chordid) == true {
+	        return successor
+        }else{
+   		np := nearestPredecessor(id)
+                client, err := jsonrpc.Dial(protocol, np.Address)
+                if err != nil {
+                     log.Fatal("dialing:", err)
+                }
+                var reply2 NodeInfo
+                var reply NodeInfo
+                RpcCall := client.Go("DIC3.RPCFindSuccessorFT", id, &reply2,nil)
+                replyCall := <-RpcCall.Done
+                if replyCall != nil {
+                }
+                client.Close()
+                reply.Address = reply2.Address
+                reply.Chordid = reply2.Chordid
+                return reply
+        } 
+}
+
+func (t *DIC3) RPCFindSuccessorFT(request int, reply *NodeInfo) error {
+        if belongsto(request, chordid, successor.Chordid) == true {
+               reply.Chordid = successor.Chordid
+               reply.Address = successor.Address
+        } else {
+                np := nearestPredecessor(request)
+                client, err := jsonrpc.Dial(protocol, np.Address)
+                if err != nil {
+                     log.Fatal("dialing:", err)
+                }
+                var reply2 NodeInfo
+                RpcCall := client.Go("DIC3.RPCFindSuccessorFT", request, &reply2,nil)
+                replyCall := <-RpcCall.Done
+                if replyCall != nil {
+                }
+                client.Close()
+                reply.Address = reply2.Address
+                reply.Chordid = reply2.Chordid
+        }
+        return nil
 }
 func persistDict3()error{
          // For more granular writes, open a file for writing.
